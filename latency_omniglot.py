@@ -41,7 +41,7 @@ parser.add_argument("--outdir", type=str, default="latency_omniglot")
 
 # --- convolution and augmentation options ---
 parser.add_argument("--augment", type=str, default="none",
-    choices=["none", "shift", "rotation", "rotation_shift", "rotation_shift_shear"],
+    choices=["none", "shift", "rotation", "rotation_shift", "rotation_shift_shear","rotation_shift_shear_zoom"],
     help="Type of augmentation applied per epoch.")
 args = parser.parse_args()
 

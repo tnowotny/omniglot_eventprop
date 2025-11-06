@@ -89,7 +89,7 @@ def stratified_split(X, y, val_fraction=0.1):
     return X[train_idx], y[train_idx], X[val_idx], y[val_idx]
 
 # --------------------------- Augmentation functions ----------------------------
-def augment_images(X, mode="none", max_shift=4, max_rot=10, max_shear=0.2):
+def augment_images(X, mode="none", max_shift=4, max_rot=10, max_shear=0.2, zoom_range=(0.9, 1.1)):
     """Apply augmentation according to the chosen mode."""
     X = tf.convert_to_tensor(X.reshape((-1, 28, 28, 1)), dtype=tf.float32)
     out = []
@@ -103,6 +103,8 @@ def augment_images(X, mode="none", max_shift=4, max_rot=10, max_shear=0.2):
         shear_x = np.random.uniform(-max_shear, max_shear)
         shear_y = np.random.uniform(-max_shear, max_shear)
         cos_a, sin_a = np.cos(np.radians(angle)), np.sin(np.radians(angle))
+        zoom = np.random.uniform(*zoom_range)
+        
         # Build affine transform according to mode
         if mode == "shift":
             transform = [1, 0, shift_x, 0, 1, shift_y, 0, 0]
@@ -116,6 +118,12 @@ def augment_images(X, mode="none", max_shift=4, max_rot=10, max_shear=0.2):
                 sin_a, cos_a + shear_y, shift_y,
                 0, 0
             ]
+        elif mode == "rotation_shift_shear_zoom":
+            transform = [
+                zoom * (cos_a + shear_x), -sin_a, shift_x,
+                sin_a, zoom * (cos_a + shear_y), shift_y,
+                0, 0
+            ]    
         img_aug = tfa.image.transform(img, transform, fill_mode='nearest')
         img_aug = tf.clip_by_value(img_aug, 0.0, 1.0)
         out.append(img_aug)
