@@ -1,0 +1,7 @@
+#!/its/home/la525/ml_genn/examples/event_prop/omniglot_eventprop-main/genn5-env/bin/python3.10
+import sys
+from fontTools.__main__ import main
+if __name__ == '__main__':
+    if sys.argv[0].endswith('.exe'):
+        sys.argv[0] = sys.argv[0][:-4]
+    sys.exit(main())

@@ -89,7 +89,7 @@ def stratified_split(X, y, val_fraction=0.1):
     return X[train_idx], y[train_idx], X[val_idx], y[val_idx]
 
 # --------------------------- Augmentation functions ----------------------------
-def augment_images(X, mode="none", max_shift=4, max_rot=10, max_shear=0.2, zoom_range=(0.9, 1.1)):
+def augment_images(X, mode="none", max_shift=4, max_rot=10, max_shear=0.2, zoom_range=(0.9, 1.1),contrast_range=(0.85, 1.15)):
     """Apply augmentation according to the chosen mode."""
     X = tf.convert_to_tensor(X.reshape((-1, 28, 28, 1)), dtype=tf.float32)
     out = []
@@ -104,10 +104,13 @@ def augment_images(X, mode="none", max_shift=4, max_rot=10, max_shear=0.2, zoom_
         shear_y = np.random.uniform(-max_shear, max_shear)
         cos_a, sin_a = np.cos(np.radians(angle)), np.sin(np.radians(angle))
         zoom = np.random.uniform(*zoom_range)
+        c_factor = np.random.uniform(*contrast_range)
         
         # Build affine transform according to mode
-        if mode == "shift":
+        if mode == "shift" or "shift_contrast":
             transform = [1, 0, shift_x, 0, 1, shift_y, 0, 0]
+        elif mode == "shift_zoom" or "shift_zoom_contrast":
+            transform = [zoom, 0, shift_x, 0, zoom, shift_y, 0, 0]    
         elif mode == "rotation":
             transform = [cos_a, -sin_a, 0, sin_a, cos_a, 0, 0, 0]
         elif mode == "rotation_shift":
@@ -118,17 +121,50 @@ def augment_images(X, mode="none", max_shift=4, max_rot=10, max_shear=0.2, zoom_
                 sin_a, cos_a + shear_y, shift_y,
                 0, 0
             ]
-        elif mode == "rotation_shift_shear_zoom":
+        elif mode == "rotation_shift_shear_zoom" or "rotation_shift_shear_zoom_contrast":
             transform = [
                 zoom * (cos_a + shear_x), -sin_a, shift_x,
                 sin_a, zoom * (cos_a + shear_y), shift_y,
                 0, 0
-            ]    
+            ]
+        
         img_aug = tfa.image.transform(img, transform, fill_mode='nearest')
+
+        # --- Apply random contrast jitter ---
+
+        if mode ==  "rotation_shift_shear_zoom_contrast" or "shift_zoom_contrast" or "shift_contrast":
+           img_aug = tf.image.adjust_contrast(img_aug, contrast_factor=c_factor)
+
+        # --- Clip pixel values to [0, 1] ---
+
         img_aug = tf.clip_by_value(img_aug, 0.0, 1.0)
         out.append(img_aug)
+
     X_aug = np.array([tf.squeeze(i).numpy() for i in out])
     return X_aug.reshape((-1, 28 * 28))
+
+# --------------------------- Regularization helper ----------------------------
+def apply_dropout(X, rate=0.2):
+    """
+    Apply dropout-like regularization to input activations or flattened images.
+    Randomly sets a fraction of elements to zero (simulates neuron deactivation).
+
+    Parameters
+    ----------
+    X : np.ndarray
+        Input array (e.g., flattened images) of shape [N, 784].
+    rate : float
+        Fraction of units to drop (e.g., 0.2 = 20%).
+
+    Returns
+    -------
+    np.ndarray
+        Array with random elements set to zero.
+    """
+    if rate <= 0.0:
+        return X
+    mask = np.random.binomial(1, 1.0 - rate, X.shape)
+    return X * mask
 
 # --------------------------- Convolution helper ----------------------------
 

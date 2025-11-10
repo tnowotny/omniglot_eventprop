@@ -41,8 +41,11 @@ parser.add_argument("--outdir", type=str, default="latency_omniglot")
 
 # --- convolution and augmentation options ---
 parser.add_argument("--augment", type=str, default="none",
-    choices=["none", "shift", "rotation", "rotation_shift", "rotation_shift_shear","rotation_shift_shear_zoom"],
+    choices=["none", "shift", "shift_contrast", "shift_zoom","shift_zoom_contrast","rotation", "rotation_shift", "rotation_shift_shear","rotation_shift_shear_zoom", "rotation_shift_shear_zoom_contrast"],
     help="Type of augmentation applied per epoch.")
+parser.add_argument("--dropout", type=float, default=0.0,
+    help="Apply dropout regularization with given rate (0 = disabled)")
+            
 args = parser.parse_args()
 
 SHOW_EXAMPLE = False
@@ -120,6 +123,13 @@ with compiler:
     for epoch in range(1, args.epochs+1):
         print(f"\n🌀 Epoch {epoch}/{args.epochs} — applying {args.augment}")
         X_aug = augment_images(X_train, mode=args.augment)
+       
+        # --- Apply dropout regularization if enabled ---
+        if args.dropout > 0:
+            print(f"Applying dropout regularization (rate={args.dropout})")
+            X_aug = apply_dropout(X_aug, rate=args.dropout)
+        
+        
         if SHOW_EXAMPLE:
             plot_examples(X_aug, p["TARGET_H"], p["TARGET_W"], 20, 20)
         train_spikes = linear_latency_encode_data(
@@ -138,6 +148,7 @@ with compiler:
         tr_acc = get_accuracy(metrics)
         va_acc = get_accuracy(val_metrics)
         print(f"Epoch {epoch:03d}: train={tr_acc*100:.2f}%  val={va_acc*100:.2f}%")
+                  
         train_accs.append(tr_acc)
         val_accs.append(va_acc)
 
