@@ -2,22 +2,10 @@ import numpy as np
 import tensorflow as tf
 import tensorflow_datasets as tfds
 import tensorflow_addons as tfa  # required for affine transforms
+import matplotlib.pyplot as plt
+import scipy
 
-def get_kernel(name: str):
-    kernels = {
-        "gaussian3": [[1, 2, 1], [2, 4, 2], [1, 2, 1]],
-        "sharpen": [[0,-1,0],[-1,5,-1],[0,-1,0]],
-        "sobel_x": [[-1,0,1],[-2,0,2],[-1,0,1]],
-        "sobel_y": [[-1,-2,-1],[0,0,0],[1,2,1]],
-        "laplace": [[0,1,0],[1,-4,1],[0,1,0]],
-        "none": [[0,0,0],[0,1,0],[0,0,0]],
-    }
-    k = np.array(kernels[name], np.float32)
-    if name == "gaussian3":
-        k = k / k.sum()
-    return k
-
-# -----------------------------Basic data handling ------------------------------
+# parse the command line alphabet specification
 def parse_alphabet_spec(spec: str):
     """Parse alphabet argument: '0-4' → [0,1,2,3,4], '0,2,5' → [0,2,5]"""
     parts = [p.strip() for p in spec.split(",") if p.strip()]
@@ -31,52 +19,71 @@ def parse_alphabet_spec(spec: str):
             result.append(int(p))
     return sorted(set(result))
 
-def _prep_example(alphabet, alphabet_char_id, img, lbl, target_h= 28, target_w= 28,
-                  invert=True, do_minmax=True):
-    img = tf.image.convert_image_dtype(img, tf.float32)
-    if img.shape.rank == 3 and img.shape[-1] == 3:
-        img = tf.image.rgb_to_grayscale(img)
-    img = tf.image.resize(img, [target_h, target_w])
-    img = tf.squeeze(img, axis=-1)
-    if do_minmax:
-        mn, mx = tf.reduce_min(img), tf.reduce_max(img)
-        img = tf.where(mx > mn, (img - mn) / (mx - mn), img)
-    if invert:
-        img = 1.0 - img
-    img = tf.clip_by_value(img, 0.0, 1.0)
-    return alphabet, alphabet_char_id, img, lbl
+# pre-processing of the omniglot images as procided by tensorflow
+def _prep_example(ex):
+    print(ex)
+    if ex["image"].shape.rank == 3 and ex["image"].shape[-1] == 3:
+        ex["image"] = tf.image.rgb_to_grayscale(ex["image"])
+    ex["image"] = tf.squeeze(ex["image"], axis=-1)
+    ex["image"] = 255 - ex["image"]
+    return ex
 
-"""
-Function for loading the entire omniglot dataset (alphabet= None) or a single alphabet (e.g. alphabet="1") or a list of alphabets (e.g. alphabet= ["0", "1"]).
-"""
+# load the omniglot dataset from tensorflow
+def load_omniglot(split="train"):
+    images = []
+    labels = []
+    alph_ids = []
+    char_ids = []
 
-def load_omniglot(alphabet=None, target_h= 28, target_w= 28, invert= True):
-    data = []
-    # TensorFlow stupidly splits the alphabets into "train" and "test" with unknown
-    # reasoning for the arbitrary split; here, we allow to load any combination of alphabets
-    for split in ["train", "test"]:
-        ds = tfds.load("omniglot", split=split)
-        ds = ds.map(lambda ex: _prep_example(ex["alphabet"], ex["alphabet_char_id"], ex["image"], ex["label"], target_h, target_w, invert))
-        data.append(ds)
-    if (isinstance(alphabet,str)):
-        alphabet= [ alphabet ]
-    images, labels = [], []
-    a = set()
-    i=0
-    for ds in data:
-        for ex in ds.as_numpy_iterator():
-            i=i+1
-            if alphabet is None or ex[0] in alphabet:
-                a.add(ex[0])
-                images.append(ex[2])
-                labels.append(ex[3])
-    images, labels = np.asarray(images), np.asarray(labels)
+    # Load TFDS metadata
+    builder = tfds.builder("omniglot")
+    builder.download_and_prepare()
+    info = builder.info
+    alph_names = info.features["alphabet"].names
+
+    # Load full dataset (split == "train" or == "test")
+    ds = tfds.load("omniglot", split=split, shuffle_files=False)
+    # Preprocess each example
+    ds = ds.map(lambda ex: _prep_example(ex)) 
+    # Convert TFDS tensors to numpy
+    ds = tfds.as_numpy(ds)
+    for ex in ds:
+        images.append(ex["image"])
+        labels.append(ex["label"])
+        alph_ids.append(int(ex["alphabet"]))
+        char_ids.append(int(ex["alphabet_char_id"]))
+
+    # Final conversion
+    images = np.asarray(images).astype(np.float32)
+    labels = np.asarray(labels)
+    alph_ids = np.asarray(alph_ids)
+    char_ids = np.asarray(char_ids)
+
+    # Remap labels
     uniq = np.unique(labels)
     remap = {u: i for i, u in enumerate(uniq)}
     labels = np.vectorize(remap.get)(labels)
-    print(f"[Omniglot] kept {len(images)} samples, {len(uniq)} classes (alphabets loaded={a})")
-    return images, labels, len(uniq)
 
+    print(f"[Omniglot] Loaded {len(images)} samples from {split}")
+    print(f"           Classes={len(uniq)}")
+
+    return images, labels, alph_ids, char_ids, remap, len(uniq)
+
+
+# --------------------------- make a validation split ----------------------------
+def validation_split(X, y, split= 0.1):
+    N = len(y)
+    ids = np.arange(N)
+    np.random.shuffle(ids)
+    N_val = int(N*split)
+    N_train = N-N_val
+    X_train = X[ids[:N_train],:,:]
+    y_train = y[ids[:N_train]]
+    X_val = X[ids[N_train:],:,:]
+    y_val = y[ids[N_train:]]
+    return X_train, X_val, y_train, y_val
+
+# --------------------- make a stratified validation split ---------------------- 
 def stratified_split(X, y, val_fraction=0.1):
     rng = np.random.default_rng(42)
     train_idx, val_idx = [], []
@@ -89,137 +96,65 @@ def stratified_split(X, y, val_fraction=0.1):
     return X[train_idx], y[train_idx], X[val_idx], y[val_idx]
 
 # --------------------------- Augmentation functions ----------------------------
-def augment_images(X, mode="none", max_shift=4, max_rot=10, max_shear=0.2, zoom_range=(0.9, 1.1),contrast_range=(0.85, 1.15)):
+def augment_images(X, augmentations=[], max_shift=4, max_rot=10, max_shear=0.1, zoom_range=(0.9, 1.1), DEBUG=False):
     """Apply augmentation according to the chosen mode."""
-    X = tf.convert_to_tensor(X.reshape((-1, 28, 28, 1)), dtype=tf.float32)
-    out = []
-    for img in X:
-        if mode == "none":
-            out.append(img)
-            continue
+    X_aug = X.copy()
+    X_new = []
+    for img in X_aug:
+        if DEBUG:
+            plt.figure()
+            plt.imshow(img)
+            plt.colorbar()
         shift_x = np.random.uniform(-max_shift, max_shift)
         shift_y = np.random.uniform(-max_shift, max_shift)
         angle = np.random.uniform(-max_rot, max_rot)
         shear_x = np.random.uniform(-max_shear, max_shear)
         shear_y = np.random.uniform(-max_shear, max_shear)
         cos_a, sin_a = np.cos(np.radians(angle)), np.sin(np.radians(angle))
+        if DEBUG:
+            print(f"cos_a: {cos_a}, sin_a: {sin_a}")
         zoom = np.random.uniform(*zoom_range)
-        c_factor = np.random.uniform(*contrast_range)
-        
-        # Build affine transform according to mode
-        if mode == "shift" or "shift_contrast":
-            transform = [1, 0, shift_x, 0, 1, shift_y, 0, 0]
-        elif mode == "shift_zoom" or "shift_zoom_contrast":
-            transform = [zoom, 0, shift_x, 0, zoom, shift_y, 0, 0]    
-        elif mode == "rotation":
-            transform = [cos_a, -sin_a, 0, sin_a, cos_a, 0, 0, 0]
-        elif mode == "rotation_shift":
-            transform = [cos_a, -sin_a, shift_x, sin_a, cos_a, shift_y, 0, 0]
-        elif mode == "rotation_shift_shear":
-            transform = [
-                cos_a + shear_x, -sin_a, shift_x,
-                sin_a, cos_a + shear_y, shift_y,
-                0, 0
-            ]
-        elif mode == "rotation_shift_shear_zoom" or "rotation_shift_shear_zoom_contrast":
-            transform = [
-                zoom * (cos_a + shear_x), -sin_a, shift_x,
-                sin_a, zoom * (cos_a + shear_y), shift_y,
-                0, 0
-            ]
-        
-        img_aug = tfa.image.transform(img, transform, fill_mode='nearest')
 
-        # --- Apply random contrast jitter ---
+        A = np.identity(2)
+        offset = [0.0, 0.0]
+        for aug in augmentations:
+            if aug == "shift":
+                offset = [shift_x, shift_y]
+            if aug == "rotate":
+                A = np.matmul(A, np.asarray([[cos_a, -sin_a],[sin_a, cos_a]]))
+            if aug == "zoom":
+                A = np.matmul(A, np.asarray([[zoom, 0.0],[0.0, zoom]]))
+            if aug == "shear":
+                A = np.matmul(A, np.asarray([[ 1.0, 0.0], [ shear_x, 1.0 ]]))
+                A = np.matmul(A, np.asarray([[ 1.0, shear_y], [ 0.0, 1.0 ]]))
+        img = scipy.ndimage.affine_transform(img, A, offset)
+        img = np.clip(img, 0, 255)
+        if DEBUG:
+            plt.figure()
+            plt.imshow(img,vmin= 0, vmax= 255)
+            plt.colorbar()
+            plt.show()
+        X_new.append(img)
+       
+    return np.asarray(X_new)
 
-        if mode ==  "rotation_shift_shear_zoom_contrast" or "shift_zoom_contrast" or "shift_contrast":
-           img_aug = tf.image.adjust_contrast(img_aug, contrast_factor=c_factor)
+def rescale_images(X, ht, wd, DEBUG=False):
+    X_c = X.copy()
+    X_re = []
+    for img in X_c:
+        X_re.append(scipy.ndimage.zoom(img, [ht/img.shape[0], wd/img.shape[0]]))
+        if DEBUG:
+            print(X_re[-1].shape)
+            plt.figure()
+            plt.imshow(X_re[-1],vmin= 0, vmax= 255)
+            plt.colorbar()
+            plt.show()
+    return np.asarray(X_re)
 
-        # --- Clip pixel values to [0, 1] ---
-
-        img_aug = tf.clip_by_value(img_aug, 0.0, 1.0)
-        out.append(img_aug)
-
-    X_aug = np.array([tf.squeeze(i).numpy() for i in out])
-    return X_aug.reshape((-1, 28 * 28))
-
-# --------------------------- Regularization helper ----------------------------
-def apply_dropout(X, rate=0.2):
-    """
-    Apply dropout-like regularization to input activations or flattened images.
-    Randomly sets a fraction of elements to zero (simulates neuron deactivation).
-
-    Parameters
-    ----------
-    X : np.ndarray
-        Input array (e.g., flattened images) of shape [N, 784].
-    rate : float
-        Fraction of units to drop (e.g., 0.2 = 20%).
-
-    Returns
-    -------
-    np.ndarray
-        Array with random elements set to zero.
-    """
-    if rate <= 0.0:
-        return X
-    mask = np.random.binomial(1, 1.0 - rate, X.shape)
-    return X * mask
-
-# --------------------------- Convolution helper ----------------------------
-
-def convolve_images(X_flat, kernel_name="none"):
-    if kernel_name == "none":
-        return X_flat
-    k = _get_kernel(kernel_name)
-    X4 = tf.convert_to_tensor(X_flat.reshape(-1,28,28,1), dtype=tf.float32)
-    k4 = tf.reshape(tf.convert_to_tensor(k), (3,3,1,1))
-    Y = tf.nn.conv2d(X4, k4, strides=1, padding="SAME")
-    y_min, y_max = tf.reduce_min(Y), tf.reduce_max(Y)
-    Y = (Y - y_min) / (y_max - y_min + 1e-6)
-    return Y.numpy().reshape(-1, 28*28)
-
-# --------------------------- Helper ----------------------------
-def get_accuracy(m):
-    if isinstance(m, dict):
-        for v in m.values():
-            if hasattr(v, "result"): return float(v.result)
-    if hasattr(m, "result"): return float(m.result)
-    if isinstance(m, (float,int)): return float(m)
-    return 0.0
-
-
-def plot_examples(X, sy, sx, ny, nx):
-    fig, ax = plt.subplots(nx,ny)
-    for i in range(ny):
-        for j in range(nx):
-            ax[i,j].imshow(X_aug[i*nx+j,:].reshape((sy,sx)))
+def show_example(X):
+    fix, ax = plt.subplots(10,10)
+    for i in range(10):
+        for j in range(10):
+            id = i*10+j
+            ax[i,j].imshow(X[id])
     plt.show()
-
-
-# --------------------------- Save example images ----------------------------
-def save_examples(outdir, alphabet):
-    base_examples_dir = os.path.join(outdir, f"examples_alphabet_{alphabet}")
-    os.makedirs(base_examples_dir, exist_ok=True)
-    fig, ax = plt.subplots(10, 10, figsize=(8, 8))
-    for i in range(100):
-        py, px = divmod(i, 10)
-        ax[py, px].imshow(X_train[i].reshape(28, 28), cmap='gray')
-        ax[py, px].axis("off")
-    plt.tight_layout()
-    grid_path = os.path.join(base_examples_dir, "grid_examples.png")
-    plt.savefig(grid_path, dpi=150)
-    plt.close()
-    print(f"[examples] Saved grid of examples to: {grid_path}")
-
-
-# --------------------------- Plot results with smoothing and best point ------------
-def moving_average(data, window_size=10):
-    """
-    Compute simple moving average for smoothing.
-    Used to make the accuracy curve less noisy.
-    """
-    if len(data) < window_size:
-        return np.array(data)
-    return np.convolve(data, np.ones(window_size)/window_size, mode="valid")
-
