@@ -65,7 +65,7 @@ X_val = np.load(basename+"audio_validation.npy")*p["INPUT_SCALE"]
 X_val = np.transpose(X_val, [ 0, 2, 1])
 Y_val = np.load(basename+"labels_validation.npy")
 print(f"X_train shape: {X_train.shape}, X_val shape: {X_val.shape}")
-serialiser = Numpy("checkpoints_" + p["NAME"])
+serialiser = Numpy(p["NAME"]+"_checkpoints")
 input, network, ff, rec, hidden, output = create_model(p)
 
 max_example_timesteps = p["INPUT_FRAMES"]*p["INPUT_FRAME_TIMESTEPS"]
