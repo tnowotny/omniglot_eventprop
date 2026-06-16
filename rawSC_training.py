@@ -9,7 +9,7 @@ from ml_genn.serialisers import Numpy
 import rawSC_util
 
 from time import perf_counter
-import os
+import os, sys, json
 
 from rawSC_model import create_model
 
@@ -43,25 +43,21 @@ p= {"RECURR": False,
     "SHIFT": 4,
 }
 
+if len(sys.argv) > 1:
+    fname= f"{sys.argv[1]}.json"
+    with open(fname,"r") as f:
+        p0= json.load(f)
+
+    for (name,value) in p0.items():
+        p[name]= value
+
+print(p)
+with open(f"{p['NAME']}_run.json","w") as f:
+    json.dump(p,f,indent=4)
+
 np.random.seed(p["SEED"])
 
-class EaseInSchedule(Callback):
-    def __init__(self):
-        pass
-    def set_params(self, compiled_network, **kwargs):
-        self._optimiser = compiled_network.optimisers[0][0]
-    def on_batch_begin(self, batch):
-        # Set parameter to return value of function
-        if self._optimiser.alpha < 0.001 :
-            self._optimiser.alpha = (self._optimiser.alpha) * (1.05 ** batch)
-        else:
-            self._optimiser.alpha = 0.001
-
-def alpha_schedule(epoch, alpha):
-    return alpha * 0.9975
-
-
-basename = os.path.expanduser("~/data/rawSC/")
+basename = "../data/rawSC/"
 X_train = np.load(basename+"audio_train.npy")*p["INPUT_SCALE"]
 X_train = np.transpose(X_train, [ 0, 2, 1])
 Y_train = np.load(basename+"labels_train.npy")
@@ -101,7 +97,8 @@ if p["PLOT_EXAMPLES"]:
             ax[i][j].yaxis.set_inverted(False)
 
 
-shift = rawSC_util.Shift(p["SHIFT"], p["NUM_INPUT"])
+if p["SHIFT"] > 0:
+    shift = rawSC_util.Shift(p["SHIFT"], p["NUM_INPUT"])
 
 with compiled_net:
     # Loop through epochs
@@ -112,7 +109,7 @@ with compiled_net:
     val_callbacks = []
     best_e, best_acc = 0, 0
     for e in range(p["NUM_EPOCHS"]):
-        X = shift(X_train)
+        X = shift(X_train) if p["SHIFT"] > 0 else X_train
         metrics, val_metrics, cb, val_cb  = compiled_net.train_validate({input: X},
                                                 {output: Y_train},
                                                 start_epoch=e, num_epochs=1, 
