@@ -22,7 +22,7 @@ def create_model(p):
         ff = [Connection(input, hidden[0], Dense(Normal(mean=p["INPUT_HIDDEN_MEAN"], sd=p["INPUT_HIDDEN_SD"]), Uniform(0, p["FF_DELAY_INIT"])),
                          Exponential(5.0), max_delay_steps=1000)]
         if p["RECURR"]:
-            rec = [Connection(hidden[0], hidden[0], Dense(Normal(mean=p["RECURR_MEAN"], sd=p["RECURR_SD"]), Uniform(0, p["RECURR_INIT"])),
+            rec = [Connection(hidden[0], hidden[0], Dense(Normal(mean=p["RECURR_MEAN"], sd=p["RECURR_SD"]), Uniform(0, p["RECURR_DELAY_INIT"])),
                               Exponential(5.0), max_delay_steps=1000)]
         else:
             rec = [None]
