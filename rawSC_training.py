@@ -41,6 +41,8 @@ p= {"RECURR": False,
     "PLOT_EXAMPLES": False,
     "SHUFFLE": True,
     "SHIFT": 4,
+    "RESTART": False,
+    "START_EPOCH": 0
 }
 
 if len(sys.argv) > 1:
@@ -67,6 +69,9 @@ Y_val = np.load(basename+"labels_validation.npy")
 print(f"X_train shape: {X_train.shape}, X_val shape: {X_val.shape}")
 serialiser = Numpy(p["NAME"]+"_checkpoints")
 input, network, ff, rec, hidden, output = create_model(p)
+
+if p["RESTART"]:
+    network.load((0,),serialiser)
 
 max_example_timesteps = p["INPUT_FRAMES"]*p["INPUT_FRAME_TIMESTEPS"]
 optimisers = {"all_connections": {"weight": Adam(p["LR"])}}
@@ -108,7 +113,12 @@ with compiled_net:
         callbacks.append(SpikeRecorder(hid, key="hidden_spikes_"+str(i), record_counts=True))
     val_callbacks = []
     best_e, best_acc = 0, 0
-    for e in range(p["NUM_EPOCHS"]):
+    if p["RESTART"]:
+        d = np.loadtxt(p["NAME"]+"_results.txt")
+        best_acc = np.max(d[:,-1])
+        best_e = np.argmax(d[:,-1])
+        print(f"Previous max val accuracy: {best_acc}, at epoch {best_e}")
+    for e in range(p["START_EPOCH"],p["START_EPOCH"]+p["NUM_EPOCHS"]):
         X = shift(X_train) if p["SHIFT"] > 0 else X_train
         metrics, val_metrics, cb, val_cb  = compiled_net.train_validate({input: X},
                                                 {output: Y_train},

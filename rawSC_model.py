@@ -16,7 +16,7 @@ def create_model(p):
             hidden.append(Population(LeakyIntegrateFire(v_thresh=1.0, tau_mem=20.0),
                             p["NUM_HIDDEN"], record_spikes=True))
         output = Population(LeakyIntegrate(tau_mem=20.0, readout="avg_var_exp_weight"),
-                            p["NUM_OUTPUT"])
+                            p["NUM_OUTPUT"],name="output")
 
         # Connections
         ff = [Connection(input, hidden[0], Dense(Normal(mean=p["INPUT_HIDDEN_MEAN"], sd=p["INPUT_HIDDEN_SD"]), Uniform(0, p["FF_DELAY_INIT"])),
