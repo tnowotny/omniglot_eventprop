@@ -30,6 +30,8 @@ p= {"RECURR": False,
     "FF_DELAY_INIT": 50,
     "HIDDEN_HIDDEN_MEAN": 0.02,
     "HIDDEN_HIDDEN_SD": 0.03,
+    "RECURR_MEAN": 0.0,
+    "RECURR_SD": 0.01,
     "RECURR_DELAY_INIT": 0,
     "HIDDEN_OUT_MEAN": 0.0,
     "HIDDEN_OUT_SD": 0.03,
@@ -44,6 +46,19 @@ p= {"RECURR": False,
     "RESTART": False,
     "START_EPOCH": 0
 }
+
+
+class EaseInSchedule(Callback):
+    def create_state(self, compiled_network, **kwargs):
+        return [s for s in compiled_network.optimiser_state]
+
+    def on_batch_begin(self, state, batch):
+        # Set parameter to return value of function
+        for s in state:
+            if s.alpha < 0.001 :
+                s.alpha = (0.001 / 100.0) * (1.05 ** batch)
+            else:
+                s.alpha = 0.001
 
 if len(sys.argv) > 1:
     fname= f"{sys.argv[1]}.json"
@@ -74,7 +89,7 @@ if p["RESTART"]:
     network.load((0,),serialiser)
 
 max_example_timesteps = p["INPUT_FRAMES"]*p["INPUT_FRAME_TIMESTEPS"]
-optimisers = {"all_connections": {"weight": Adam(p["LR"])}}
+optimisers = {"all_connections": {"weight": Adam(p["LR"]/100.0)}}
 if p["LEARN_FF"]:
     for conn in ff:
         optimisers[conn] = {"delay": Adam(p["DELAY_LR"])}
@@ -108,7 +123,7 @@ if p["SHIFT"] > 0:
 with compiled_net:
     # Loop through epochs
     start_time = perf_counter()
-    callbacks = [SpikeRecorder(input, key="input_spikes")]
+    callbacks = [EaseInSchedule()] #, SpikeRecorder(input, key="input_spikes")]
     for i, hid in enumerate(hidden):
         callbacks.append(SpikeRecorder(hid, key="hidden_spikes_"+str(i), record_counts=True))
     val_callbacks = []
